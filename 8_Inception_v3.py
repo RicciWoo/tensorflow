@@ -3,6 +3,7 @@ slim = tf.contrib.slim
 trunc_normal = lambda stddev: tf.truncated_normal_initializer(0.0, stddev)
 
 # copy from 6_AlexNet.py
+from datetime import datetime
 import time
 def time_tensorflow_run(session, target, info_string):
   """Run the computation to obtain the target tensor and print timing stats.
