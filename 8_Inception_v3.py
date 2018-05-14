@@ -2,6 +2,38 @@ import tensorflow as tf
 slim = tf.contrib.slim
 trunc_normal = lambda stddev: tf.truncated_normal_initializer(0.0, stddev)
 
+# copy from 6_AlexNet.py
+import time
+def time_tensorflow_run(session, target, info_string):
+  """Run the computation to obtain the target tensor and print timing stats.
+
+  Args:
+    session: the TensorFlow session to run the computation under.
+    target: the target Tensor that is passed to the session's run() function.
+    info_string: a string summarizing this run, to be printed with the stats.
+
+  Returns:
+    None
+  """
+  num_steps_burn_in = 10
+  total_duration = 0.0
+  total_duration_squared = 0.0
+  for i in range(num_batches + num_steps_burn_in):
+    start_time = time.time()
+    _ = session.run(target)
+    duration = time.time() - start_time
+    if i >= num_steps_burn_in:
+      if not i % 10:
+        print ('%s: step %d, duration = %.3f' %
+               (datetime.now(), i - num_steps_burn_in, duration))
+      total_duration += duration
+      total_duration_squared += duration * duration
+  mn = total_duration / num_batches
+  vr = total_duration_squared / num_batches - mn * mn
+  sd = math.sqrt(vr)
+  print ('%s: %s across %d steps, %.3f +/- %.3f sec / batch' %
+         (datetime.now(), info_string, num_batches, mn, sd))
+
 def inception_v3_arg_scope(weight_decay=0.00004, stddev=0.1,
 	                         batch_norm_var_collection='moving_vars'):
 	
@@ -32,7 +64,7 @@ def inception_v3_base(inputs, scope=None):
 	end_points = {}
 	with tf.variable_scope(scope, 'InceptionV3', [inputs]):
 		with slim.arg_scope([slim.conv2d, slim.max_pool2d, slim.avg_pool2d],
-			                stride=1, padding='VALID'):
+												stride=1, padding='VALID'):
 			net = slim.conv2d(inputs, 32, [3, 3], stride=2, scope='Conv2d_1a_3x3')
 			net = slim.conv2d(net, 32, [3, 3], scope='Conv2d_2a_3x3')
 			net = slim.conv2d(net, 64, [3, 3], padding='SAME', scope='Conv2d_2b_3x3')
@@ -42,7 +74,7 @@ def inception_v3_base(inputs, scope=None):
 			net = slim.max_pool2d(net, [3, 3], stride=2, scope='MaxPool_5a_3x3')
 
 		with slim.arg_scope([slim.conv2d, slim.max_pool2d, slim.avg_pool2d],
-			                  stride=1, padding='SAME')
+			                  stride=1, padding='SAME'):
 			with tf.variable_scope('Mixed_5b'):
 				with tf.variable_scope('Branch_0'):
 					branch_0 = slim.conv2d(net, 64, [1, 1], scope='Conv2d_0a_1x1')
@@ -173,6 +205,7 @@ def inception_v3_base(inputs, scope=None):
 					branch_3 = slim.avg_pool2d(net, [3, 3], scope='AvgPool_0a_3x3')
 					branch_3 = slim.conv2d(branch_3, 192, [1, 1], scope='Conv2d_0b_1x1')
 				net = tf.concat([branch_0, branch_1, branch_2, branch_3], 3)
+			end_points['Mixed_6e'] = net
 
 			with tf.variable_scope('Mixed_7a'):
 				with tf.variable_scope('Branch_0'):
@@ -259,15 +292,31 @@ def inception_v3(inputs,
 																	 weights_initializer=trunc_normal(0.001),
 																	 scope='Conv2d_2b_1x1')
 					if spatial_squeeze:
-						aux_logits = tf.spatial_squeeze(aux_logits, [1, 2],
+						aux_logits = tf.squeeze(aux_logits, [1, 2],
 																						name='SpatialSqueeze')
 					end_points['AuxLogits'] = aux_logits
 
-	with tf.variable_scope('Logits'):
-		net = slim.avg_pool2d(net, [8, 8], padding='VALID',
-													scope='AvgPool_1a_8x8')
+			with tf.variable_scope('Logits'):
+				net = slim.avg_pool2d(net, [8, 8], padding='VALID',
+															scope='AvgPool_1a_8x8')
+				net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
+				end_points['PreLogits'] = net
+				logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
+														 normalizer_fn=None, scope='Conv2d_1c_1x1')
+				if spatial_squeeze:
+					logits = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
+			end_points['Logits'] = logits
+			end_points['Preditions'] = prediction_fn(logits, scope='Preditions')
+	return logits,end_points
 
+batch_size = 32
+height, width = 299, 299
+inputs = tf.random_uniform((batch_size, height, width, 3))
+with slim.arg_scope(inception_v3_arg_scope()):
+	logits, end_points = inception_v3(inputs, is_training=False)
 
-
-
-
+init = tf.global_variables_initializer()
+sess = tf.Session()
+sess.run(init)
+num_batches=100
+time_tensorflow_run(sess, logits, "Forward")
